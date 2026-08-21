@@ -16,6 +16,8 @@ class AttendanceCreate(BaseModel):
 class AttendanceOut(BaseModel):
     id: int
     worker_id: int
+    worker_name: Optional[str] = None
+    worker_role_type: Optional[str] = None
     date: date
     check_in_time: Optional[datetime] = None
     assigned_block_id: Optional[int] = None
