@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models.worker import Worker
+from app.db.models.user import User
 from app.schemas.worker import WorkerCreate, WorkerOut, WorkerUpdate
 
 router = APIRouter()
@@ -19,15 +19,15 @@ def list_workers(
     db: Session = Depends(get_db),
 ):
     """Return active workers — used by task & attendance dropdowns."""
-    query = db.query(Worker).filter(Worker.is_active == True)  # noqa: E712
+    query = db.query(User).filter(User.is_active == True)  # noqa: E712
 
     if role_type:
-        query = query.filter(Worker.role_type == role_type)
+        query = query.filter(User.role_type == role_type)
 
     if search:
-        query = query.filter(Worker.name.ilike(f"%{search}%"))
+        query = query.filter(User.name.ilike(f"%{search}%"))
 
-    return query.order_by(Worker.name).all()
+    return query.order_by(User.name).all()
 
 
 # ── POST /api/workers ────────────────────────────────────────────────────────
@@ -40,42 +40,42 @@ def create_worker(data: WorkerCreate, db: Session = Depends(get_db)):
     bcrypt/passlib is added to the project.
     """
     # Email uniqueness check
-    if db.query(Worker).filter(Worker.email == data.email).first():
+    if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     # NIC uniqueness check (if provided)
-    if data.NIC and db.query(Worker).filter(Worker.NIC == data.NIC).first():
+    if data.NIC and db.query(User).filter(User.NIC == data.NIC).first():
         raise HTTPException(status_code=400, detail="NIC already registered")
 
     # worker_code uniqueness check (if provided)
-    if data.worker_code and db.query(Worker).filter(
-        Worker.worker_code == data.worker_code
+    if data.worker_code and db.query(User).filter(
+        User.worker_code == data.worker_code
     ).first():
         raise HTTPException(status_code=400, detail="Worker code already in use")
 
-    worker = Worker(**data.model_dump())
+    worker = User(**data.model_dump())
     db.add(worker)
     db.commit()
     db.refresh(worker)
     return worker
 
 
-# ── GET /api/workers/{id} ─────────────────────────────────────────────
+# ── GET /api/workers/{worker_id} ─────────────────────────────────────────────
 
-@router.get("/{id}", response_model=WorkerOut)
-def get_worker(id: int, db: Session = Depends(get_db)):
-    return _get_worker_or_404(id, db)
+@router.get("/{worker_id}", response_model=WorkerOut)
+def get_worker(worker_id: int, db: Session = Depends(get_db)):
+    return _get_worker_or_404(worker_id, db)
 
 
-# ── PUT /api/workers/{id} ─────────────────────────────────────────────
+# ── PUT /api/workers/{worker_id} ─────────────────────────────────────────────
 
-@router.put("/{id}", response_model=WorkerOut)
+@router.put("/{worker_id}", response_model=WorkerOut)
 def update_worker(
-    id: int,
+    worker_id: int,
     data: WorkerUpdate,
     db: Session = Depends(get_db),
 ):
-    worker = _get_worker_or_404(id, db)
+    worker = _get_worker_or_404(worker_id, db)
 
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(worker, field, value)
@@ -87,8 +87,8 @@ def update_worker(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _get_worker_or_404(id: int, db: Session) -> Worker:
-    worker = db.query(Worker).filter(Worker.id == id).first()
+def _get_worker_or_404(worker_id: int, db: Session) -> User:
+    worker = db.query(User).filter(User.id == worker_id).first()
     if not worker:
-        raise HTTPException(status_code=404, detail=f"Worker {id} not found")
+        raise HTTPException(status_code=404, detail=f"Worker {worker_id} not found")
     return worker
