@@ -7,7 +7,9 @@ from pydantic import BaseModel
 from app.db.database import get_db
 from app.db.models.user import User
 from app.schemas.auth import LoginRequest
+from app.schemas.worker import WorkerLoginRequest
 from app.services.sms_service import send_sms
+from app.services import worker_service
 
 
 router = APIRouter()
@@ -160,3 +162,11 @@ async def login(
         "requires_2fa": True,
         "user_id": user.id
     }
+
+
+@router.post("/worker-login")
+async def worker_login(
+    data: WorkerLoginRequest,
+    db: Session = Depends(get_db)
+):
+    return worker_service.authenticate_worker(db, data)

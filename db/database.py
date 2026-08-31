@@ -38,7 +38,13 @@ from app.db.models import (
     Disease,
     Treatment,
     PlantationBlock,
-    DiseaseDetection
+    DiseaseDetection,
+    Worker,
+    Attendance,
+    Task,
+    TaskWorker,
+    HarvestRecord,
+    BlockActivityLog
 )
 
 Base.metadata.create_all(bind=engine)
