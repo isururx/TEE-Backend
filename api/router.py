@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes.detection.detection import router as detection_router
 from app.api.routes.users.auth import router as auth_router
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 =======
 from app.api.routes.users.users import router as users_router
 from app.api.routes.blocks.blocks import router as blocks_router
@@ -10,10 +11,18 @@ from app.api.routes.workers.workers import router as workers_router
 from app.api.routes.tasks.tasks import router as tasks_router
 from app.api.routes.attendance.attendance import router as attendance_router
 >>>>>>> Stashed changes
+=======
+from app.api.routes.users.test_auth import router as test_auth_router
+>>>>>>> Stashed changes
 
 
 api_router = APIRouter()
 
+api_router.include_router(
+    test_auth_router,
+    prefix="/auth",
+    tags=["Authentication"]
+)
 
 api_router.include_router(
     detection_router,
