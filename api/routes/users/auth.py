@@ -9,6 +9,7 @@ from app.schemas.auth import LoginRequest
 from app.schemas.worker import WorkerLoginRequest
 from app.services.sms_service import send_sms
 from app.services import worker_service
+from app.core.security import create_access_token
 
 
 router = APIRouter()
@@ -74,9 +75,20 @@ async def verify_2fa(
     # OTP is correct
     otp_store.pop(user.id, None)
 
+    # OTP is correct
+    otp_store.pop(user.id, None)
+
+    # Generate JWT only after successful 2FA verification
+    access_token = create_access_token(
+        user_id=user.id,
+        role=user.role
+    )
+
     return {
         "success": True,
         "message": "2FA verification successful",
+        "access_token": access_token,
+        "token_type": "bearer",
         "user_id": user.id,
         "name": user.name,
         "email": user.email,
