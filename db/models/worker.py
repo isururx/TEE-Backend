@@ -6,7 +6,7 @@ from app.db.database import Base
 class Worker(Base):
     __tablename__ = "workers"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    id = Column(BigInteger, ForeignKey("users.id"), primary_key=True, index=True)
     name = Column(String, nullable=False)
     NIC = Column(BigInteger, nullable=False)
     dob = Column(Date, nullable=False)
