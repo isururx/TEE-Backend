@@ -3,12 +3,12 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from secrets import randbelow
 from pydantic import BaseModel
-
 from app.db.database import get_db
 from app.db.models.user import User
 from app.schemas.auth import LoginRequest
 from app.services.sms_service import send_sms
 from app.services import worker_service
+from app.core.security import create_access_token
 
 
 router = APIRouter()
@@ -74,9 +74,20 @@ async def verify_2fa(
     # OTP is correct
     otp_store.pop(user.id, None)
 
+    # OTP is correct
+    otp_store.pop(user.id, None)
+
+    # Generate JWT only after successful 2FA verification
+    access_token = create_access_token(
+        user_id=user.id,
+        role=user.role
+    )
+
     return {
         "success": True,
         "message": "2FA verification successful",
+        "access_token": access_token,
+        "token_type": "bearer",
         "user_id": user.id,
         "name": user.name,
         "email": user.email,
@@ -117,6 +128,7 @@ async def login(
 
     # 4. Generate 6-digit OTP
     otp = f"{randbelow(1000000):06d}"
+    print("otp Is : " + otp)
 
     # 5. Set OTP expiry to 5 minutes
     expires_at = datetime.utcnow() + timedelta(minutes=5)
@@ -128,31 +140,31 @@ async def login(
     }
 
     # 7. Send OTP through Text.lk
-    try:
+    # try:
 
-        sms_message = (
-            f"TEE verification code: {otp}. "
-            "This code will expire in 5 minutes."
-        )
+    #     sms_message = (
+    #         f"TEE verification code: {otp}. "
+    #         "This code will expire in 5 minutes."
+    #     )
 
-        sms_response = await send_sms(
-            recipient=user.phone_num,
-            message=sms_message
-        )
+    #     sms_response = await send_sms(
+    #         recipient=user.phone_num,
+    #         message=sms_message
+    #     )
 
-        print("SMS response:", sms_response)
+    #     print("SMS response:", sms_response)
 
-    except Exception as e:
+    # except Exception as e:
 
-        # Remove OTP if SMS failed
-        otp_store.pop(user.id, None)
+    #     # Remove OTP if SMS failed
+    #     otp_store.pop(user.id, None)
 
-        print("SMS sending error:", repr(e))
+    #     print("SMS sending error:", repr(e))
 
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to send verification code"
-        )
+    #     raise HTTPException(
+    #         status_code=500,
+    #         detail="Unable to send verification code"
+    #     )
 
     # 8. Return response
     return {
