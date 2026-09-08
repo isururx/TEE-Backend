@@ -33,18 +33,23 @@ def get_db():
     finally:
         db.close()
 
-from app.db.models import (
-    User,
-    Disease,
-    Treatment,
-    PlantationBlock,
-    DiseaseDetection,
-    Worker,
-    Attendance,
-    Task,
-    TaskWorker,
-    HarvestRecord,
-    BlockActivityLog
-)
-
-Base.metadata.create_all(bind=engine)
+def init_db():
+    from app.db.models import (
+        User,
+        Disease,
+        Treatment,
+        PlantationBlock,
+        DiseaseDetection,
+        Worker,
+        Attendance,
+        Task,
+        TaskWorker,
+        HarvestRecord,
+        BlockActivityLog,
+        Supplier,
+        InventoryItem,
+        InventoryMovement,
+        ActivityLog,
+    )
+    Base.metadata.create_all(bind=engine)
+

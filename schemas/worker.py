@@ -40,7 +40,3 @@ class WorkerResponse(BaseModel):
     class Config:
         from_attributes = True
 
-
-class WorkerLoginRequest(BaseModel):
-    worker_id: int
-    password: str

@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = "your-temporary-jwt-secret"
+SECRET_KEY = "hefiufhishdfids3274"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
