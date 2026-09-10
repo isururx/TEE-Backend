@@ -23,7 +23,9 @@ class Task(Base):
         ForeignKey("plantation_blocks.id"),
         nullable=False
     )
+    completion_notes = Column(Text, nullable=True)
 
+    completed_at = Column(DateTime, nullable=True)
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])
     block = relationship("PlantationBlock", foreign_keys=[plantation_block_id])
