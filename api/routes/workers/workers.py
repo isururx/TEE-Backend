@@ -4,7 +4,8 @@ from typing import List, Optional
 
 from app.db.database import get_db
 from app.schemas.worker import WorkerCreate, WorkerUpdate, WorkerResponse
-from app.services import worker_service
+from app.schemas.task import TaskResponse
+from app.services import worker_service, task_service
 
 router = APIRouter()
 
@@ -22,6 +23,15 @@ def get_worker(worker_id: int, db: Session = Depends(get_db)):
     return worker_service.get_worker_by_id(db, worker_id)
 
 
+@router.get("/{worker_id}/tasks", response_model=List[TaskResponse])
+def get_worker_tasks(
+    worker_id: int,
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    return task_service.get_worker_assigned_tasks(db, worker_id, status)
+
+
 @router.post("", response_model=WorkerResponse, status_code=201)
 def create_worker(data: WorkerCreate, db: Session = Depends(get_db)):
     return worker_service.register_new_worker(db, data)
@@ -35,3 +45,4 @@ def update_worker(worker_id: int, data: WorkerUpdate, db: Session = Depends(get_
 @router.delete("/{worker_id}", status_code=204)
 def delete_worker(worker_id: int, db: Session = Depends(get_db)):
     return worker_service.delete_worker_profile(db, worker_id)
+
