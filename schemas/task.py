@@ -20,7 +20,14 @@ class TaskUpdate(BaseModel):
     status: Optional[str] = None
     block_id: Optional[int] = None
     worker_ids: Optional[List[int]] = None
+    completion_notes: Optional[str] = None
+    completed_at: Optional[datetime] = None
 
+
+class WorkerTaskUpdate(BaseModel):
+    status: str  # "IN PROGRESS", "FINISHED", "FAILED"
+    completion_notes: Optional[str] = None
+    completed_at: Optional[datetime] = None
 
 
 class TaskResponse(BaseModel):
@@ -35,9 +42,12 @@ class TaskResponse(BaseModel):
     plantation_block: Optional[str] = None
     assigned_worker: Optional[str] = "Unassigned"
     worker_ids: List[int] = []
+    completion_notes: Optional[str] = None
+    completed_at: Optional[str] = None
 
     class Config:
         from_attributes = True
+
 
 
 class AllocationItem(BaseModel):
