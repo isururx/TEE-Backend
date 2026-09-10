@@ -33,8 +33,11 @@ def format_task(task: Task, db: Session) -> dict:
         "plantation_block_id": task.plantation_block_id,
         "plantation_block": block_str,
         "assigned_worker": assigned_worker_str,
-        "worker_ids": [w.id for w in worker_rows]
+        "worker_ids": [w.id for w in worker_rows],
+        "completion_notes": getattr(task, "completion_notes", None),
+        "completed_at": task.completed_at.strftime("%Y-%m-%d %H:%M") if getattr(task, "completed_at", None) else None,
     }
+
 
 
 def get_all_tasks(db: Session, search: Optional[str] = None, status: Optional[str] = None) -> List[dict]:
@@ -191,4 +194,23 @@ def update_task_full(db: Session, task_id: int, data) -> dict:
 
     db.refresh(task)
     return format_task(task, db)
+
+
+def get_worker_assigned_tasks(db: Session, worker_id: int, status: Optional[str] = None) -> List[dict]:
+    worker = db.query(Worker).filter(Worker.id == worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail=f"Worker {worker_id} not found")
+
+    query = (
+        db.query(Task)
+        .join(TaskWorker, TaskWorker.task_id == Task.id)
+        .filter(TaskWorker.worker_id == worker_id)
+    )
+
+    if status and status != "ALL":
+        query = query.filter(Task.status.ilike(status))
+
+    tasks = query.order_by(Task.deadline.asc(), Task.created_at.desc()).all()
+    return [format_task(t, db) for t in tasks]
+
 
