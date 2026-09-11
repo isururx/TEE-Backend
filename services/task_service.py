@@ -7,7 +7,8 @@ from fastapi import HTTPException
 from app.db.models.task import Task, TaskWorker
 from app.db.models.worker import Worker
 from app.db.models.plantation_block import PlantationBlock
-from app.schemas.task import TaskCreate, AllocationItem
+from app.schemas.task import TaskCreate, AllocationItem, WorkerTaskUpdate
+
 
 
 def format_task(task: Task, db: Session) -> dict:
@@ -212,5 +213,37 @@ def get_worker_assigned_tasks(db: Session, worker_id: int, status: Optional[str]
 
     tasks = query.order_by(Task.deadline.asc(), Task.created_at.desc()).all()
     return [format_task(t, db) for t in tasks]
+
+
+def update_worker_task_status(db: Session, worker_id: int, task_id: int, data: WorkerTaskUpdate) -> dict:
+    worker = db.query(Worker).filter(Worker.id == worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail=f"Worker {worker_id} not found")
+
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    # Verify that the worker is assigned to this task
+    assignment = db.query(TaskWorker).filter(
+        TaskWorker.task_id == task_id,
+        TaskWorker.worker_id == worker_id
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=403, detail=f"Worker {worker_id} is not assigned to task {task_id}")
+
+    new_status = data.status.upper()
+    task.status = new_status
+
+    if data.completion_notes is not None:
+        task.completion_notes = data.completion_notes
+
+    if new_status in ["FINISHED", "COMPLETED", "FAILED"]:
+        task.completed_at = data.completed_at or datetime.utcnow()
+
+    db.commit()
+    db.refresh(task)
+    return format_task(task, db)
+
 
 
