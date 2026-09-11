@@ -181,10 +181,17 @@ def update_task_full(db: Session, task_id: int, data) -> dict:
         task.priority = data.priority.upper()
     if data.status is not None:
         task.status = data.status.upper()
+        if task.status in ["FINISHED", "COMPLETED", "FAILED"] and not task.completed_at:
+            task.completed_at = datetime.utcnow()
     if data.block_id is not None:
         task.plantation_block_id = data.block_id
+    if hasattr(data, "completion_notes") and data.completion_notes is not None:
+        task.completion_notes = data.completion_notes
+    if hasattr(data, "completed_at") and data.completed_at is not None:
+        task.completed_at = data.completed_at
 
     db.commit()
+
 
     # Re-sync worker assignments if worker_ids provided
     if data.worker_ids is not None:
