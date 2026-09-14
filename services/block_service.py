@@ -196,12 +196,15 @@ def add_harvest_entry(db: Session, block_id: int, data: HarvestRecordCreate) -> 
     )
     db.add(record)
 
-    log = BlockActivityLog(
+    # MT-16: harvest creation -> block timeline via helper, same transaction
+    # (commit=False; single commit below keeps record + log atomic).
+    log_block_event(
+        db,
         block_id=block_id,
         title=f"Harvest Logged ({data.quantity_kg} kg)",
-        operator="Field Supervisor"
+        operator="Field Supervisor",
+        commit=False,
     )
-    db.add(log)
 
     db.commit()
     db.refresh(record)
