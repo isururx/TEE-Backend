@@ -8,6 +8,7 @@ from app.db.models.task import Task, TaskWorker
 from app.db.models.worker import Worker
 from app.db.models.plantation_block import PlantationBlock
 from app.schemas.task import TaskCreate, AllocationItem, WorkerTaskUpdate
+from app.services.block_service import log_block_event
 
 
 
@@ -247,6 +248,18 @@ def update_worker_task_status(db: Session, worker_id: int, task_id: int, data: W
 
     if new_status in ["FINISHED", "COMPLETED", "FAILED"]:
         task.completed_at = data.completed_at or datetime.utcnow()
+
+    # MT-15: auto-log to the block timeline (same transaction — commit=False,
+    # single commit below). plantation_block_id is NOT NULL on Task, but guard
+    # anyway so a block-less task never breaks the status update with an FK error.
+    if task.plantation_block_id:
+        log_block_event(
+            db,
+            block_id=task.plantation_block_id,
+            title=f"Task #{task.id} marked {new_status} by {worker.name}",
+            operator=worker.name,
+            commit=False,
+        )
 
     db.commit()
     db.refresh(task)
