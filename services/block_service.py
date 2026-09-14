@@ -11,6 +11,51 @@ from app.db.models.block_activity_log import BlockActivityLog
 from app.schemas.block import BlockCreate, BlockUpdate, HarvestRecordCreate
 
 
+def log_block_event(
+    db: Session,
+    block_id: int,
+    title: str,
+    operator: Optional[str] = None,
+    commit: bool = True,
+) -> BlockActivityLog:
+    """MT-14: Central helper for writing block timeline events.
+
+    All cross-entity hooks (tasks, harvest, attendance, detection,
+    inventory) should call this instead of constructing
+    ``BlockActivityLog`` rows inline, so title/operator conventions
+    and commit behaviour stay consistent.
+
+    Args:
+        db: Active SQLAlchemy session.
+        block_id: Target plantation block id (FK, required).
+        title: Short human-readable event title, e.g.
+            ``"Task #3 marked FINISHED"``.
+        operator: Who triggered the event (worker/supervisor name,
+            ``"System"``, ...). Nullable.
+        commit: When True (default) the row is committed immediately.
+            Pass ``commit=False`` when the caller will commit the
+            surrounding transaction itself (avoids partial commits).
+
+    Returns:
+        The persisted (refreshed when committed) ``BlockActivityLog``.
+    """
+    if not title or not title.strip():
+        raise HTTPException(status_code=400, detail="Activity title is required")
+
+    log = BlockActivityLog(
+        block_id=block_id,
+        title=title.strip(),
+        operator=operator,
+    )
+    db.add(log)
+    if commit:
+        db.commit()
+        db.refresh(log)
+    else:
+        db.flush()
+    return log
+
+
 def calculate_block_stats(block: PlantationBlock, db: Session) -> dict:
     total_harvest = db.query(func.coalesce(func.sum(HarvestRecord.quantity_kg), 0.0)).filter(
         HarvestRecord.block_id == block.id
