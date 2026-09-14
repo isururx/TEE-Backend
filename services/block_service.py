@@ -234,11 +234,14 @@ def delete_harvest_record(db: Session, block_id: int, record_id: int) -> None:
 
     db.delete(record)
 
-    log = BlockActivityLog(
+    # MT-17: harvest deletion -> block timeline via helper, same transaction
+    # (commit=False; single commit below keeps delete + log atomic).
+    log_block_event(
+        db,
         block_id=block_id,
         title=f"Harvest Record Deleted (ID: {record_id})",
-        operator="Manager"
+        operator="Manager",
+        commit=False,
     )
-    db.add(log)
     db.commit()
 
