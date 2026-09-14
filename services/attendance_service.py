@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from app.db.models.attendance import Attendance
 from app.db.models.worker import Worker
 from app.schemas.attendance import AttendanceCreate
+from app.services.block_service import log_block_event
 
 
 def get_initials(name: str) -> str:
@@ -114,6 +115,16 @@ def log_worker_attendance(db: Session, data: AttendanceCreate) -> dict:
         existing.check_in_time = parsed_time
         existing.assigned_block_id = block_id
         existing.status = data.status or "On-time"
+        # MT-19: re-check-in -> block timeline, same transaction (commit=False).
+        # block_id may be None (unassigned worker) -> skip log, never break check-in.
+        if block_id:
+            log_block_event(
+                db,
+                block_id=block_id,
+                title=f"Attendance: {worker.name} checked in ({existing.status})",
+                operator=worker.name,
+                commit=False,
+            )
         db.commit()
         db.refresh(existing)
         return format_attendance(existing, db)
@@ -126,6 +137,15 @@ def log_worker_attendance(db: Session, data: AttendanceCreate) -> dict:
         status=data.status or "On-time",
     )
     db.add(new_att)
+    # MT-19: first check-in -> block timeline, same transaction (commit=False).
+    if block_id:
+        log_block_event(
+            db,
+            block_id=block_id,
+            title=f"Attendance: {worker.name} checked in ({new_att.status})",
+            operator=worker.name,
+            commit=False,
+        )
     db.commit()
     db.refresh(new_att)
 
