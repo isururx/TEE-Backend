@@ -132,13 +132,13 @@ def create_new_block(db: Session, data: BlockCreate) -> dict:
     db.commit()
     db.refresh(new_block)
 
-    init_log = BlockActivityLog(
+    # MT-18a: creation log via helper (own commit — block id only exists after the commit above).
+    log_block_event(
+        db,
         block_id=new_block.id,
         title="Block Registered",
-        operator="System Admin"
+        operator="System Admin",
     )
-    db.add(init_log)
-    db.commit()
 
     return calculate_block_stats(new_block, db)
 
@@ -148,14 +148,30 @@ def update_block_details(db: Session, block_id: int, data: BlockUpdate) -> dict:
     if not block:
         raise HTTPException(status_code=404, detail=f"Block {block_id} not found")
 
-    if data.area is not None:
+    # MT-18b: track which editable fields actually changed for the timeline title.
+    changed = []
+    if data.area is not None and data.area != block.area:
+        changed.append("area")
         block.area = data.area
-    if data.tea_variety is not None:
+    if data.tea_variety is not None and data.tea_variety != block.tea_variety:
+        changed.append("tea variety")
         block.tea_variety = data.tea_variety
-    if data.plant_date is not None:
+    if data.plant_date is not None and data.plant_date != block.plant_date:
+        changed.append("plant date")
         block.plant_date = data.plant_date
-    if data.supervisor_id is not None:
+    if data.supervisor_id is not None and data.supervisor_id != block.supervisor_id:
+        changed.append("supervisor")
         block.supervisor_id = data.supervisor_id
+
+    # Edit log in the same transaction (commit=False; single commit below).
+    if changed:
+        log_block_event(
+            db,
+            block_id=block_id,
+            title=f"Block Updated ({', '.join(changed)})",
+            operator="System Admin",
+            commit=False,
+        )
 
     db.commit()
     db.refresh(block)
