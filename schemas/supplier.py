@@ -12,3 +12,15 @@ class SupplierBase(BaseModel):
     location: Optional[str] = None
     categories: Optional[str] = None
     status: Optional[str] = "Active"
+
+class SupplierCreate(SupplierBase):
+    pass
+
+class SupplierUpdate(BaseModel):
+    name: Optional[str] = None
+    contact_name: Optional[str] = None
+    phone_num: Optional[str] = None
+    email: Optional[EmailStr] = None
+    location: Optional[str] = None
+    categories: Optional[str] = None
+    status: Optional[str] = None
