@@ -2,7 +2,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime
 
-# Initialize supplier schema file (Step 1)
+# Initialize supplier schema file 
 
 class SupplierBase(BaseModel):
     name: str
