@@ -24,3 +24,10 @@ class SupplierUpdate(BaseModel):
     location: Optional[str] = None
     categories: Optional[str] = None
     status: Optional[str] = None
+
+class SupplierOut(SupplierBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
