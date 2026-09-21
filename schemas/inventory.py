@@ -39,3 +39,11 @@ class InventoryMovementBase(BaseModel):
 
 class InventoryMovementCreate(InventoryMovementBase):
     pass
+
+class InventoryMovementOut(InventoryMovementBase):
+    id: int
+    recorded_by: Optional[int] = None
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True
