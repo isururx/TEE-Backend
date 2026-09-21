@@ -36,3 +36,6 @@ class InventoryMovementBase(BaseModel):
     quantity: float
     purpose: Optional[str] = None
     block_id: Optional[int] = None
+
+class InventoryMovementCreate(InventoryMovementBase):
+    pass
