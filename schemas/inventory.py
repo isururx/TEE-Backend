@@ -20,3 +20,12 @@ class InventoryItemUpdate(BaseModel):
     unit: Optional[str] = None
     min_threshold: Optional[float] = None
     supplier_id: Optional[int] = None
+
+class InventoryItemOut(InventoryItemBase):
+    id: int
+    quantity: float
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
