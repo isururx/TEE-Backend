@@ -29,3 +29,10 @@ class InventoryItemOut(InventoryItemBase):
 
     class Config:
         from_attributes = True
+
+class InventoryMovementBase(BaseModel):
+    item_id: int
+    movement_type: str
+    quantity: float
+    purpose: Optional[str] = None
+    block_id: Optional[int] = None
