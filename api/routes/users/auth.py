@@ -7,6 +7,7 @@ from app.db.database import get_db
 from app.db.models.user import User
 from app.schemas.auth import LoginRequest
 from app.services.sms_service import send_sms
+from app.services.email_service import send_otp_email
 from app.services import worker_service
 from app.core.security import create_access_token
 
@@ -139,39 +140,91 @@ async def login(
         "expires_at": expires_at
     }
 
-    # 7. Send OTP through Text.lk
-    # try:
+    # 7. Send OTP through Email (SMTP)
+    try:
+        await send_otp_email(
+            recipient_email=user.email,
+            otp=otp,
+            recipient_name=user.name or "User"
+        )
+    except Exception as e:
+        print("Email sending error:", repr(e))
 
+    # Optional: Send OTP through Text.lk SMS
+    # try:
     #     sms_message = (
     #         f"TEE verification code: {otp}. "
     #         "This code will expire in 5 minutes."
     #     )
-
     #     sms_response = await send_sms(
     #         recipient=user.phone_num,
     #         message=sms_message
     #     )
-
     #     print("SMS response:", sms_response)
-
     # except Exception as e:
-
-    #     # Remove OTP if SMS failed
-    #     otp_store.pop(user.id, None)
-
     #     print("SMS sending error:", repr(e))
-
-    #     raise HTTPException(
-    #         status_code=500,
-    #         detail="Unable to send verification code"
-    #     )
 
     # 8. Return response
     return {
         "success": True,
-        "message": "Verification code sent",
+        "message": f"Verification code sent to {user.email}",
         "requires_2fa": True,
-        "user_id": user.id
+        "user_id": user.id,
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "phone_num": user.phone_num,
+            "role": user.role
+        }
+    }
+
+
+class ResendOTPRequest(BaseModel):
+    user_id: int | None = None
+    email: str | None = None
+
+
+@router.post("/resend-otp")
+async def resend_otp(
+    data: ResendOTPRequest,
+    db: Session = Depends(get_db)
+):
+    user = None
+    if data.user_id:
+        user = db.query(User).filter(User.id == data.user_id).first()
+    elif data.email:
+        user = db.query(User).filter(User.email == data.email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # Generate new OTP
+    otp = f"{randbelow(1000000):06d}"
+    print(f"Resent OTP for {user.email} is : {otp}")
+
+    expires_at = datetime.utcnow() + timedelta(minutes=5)
+    otp_store[user.id] = {
+        "otp": otp,
+        "expires_at": expires_at
+    }
+
+    # Dispatch email
+    try:
+        await send_otp_email(
+            recipient_email=user.email,
+            otp=otp,
+            recipient_name=user.name or "User"
+        )
+    except Exception as e:
+        print("Resend email error:", repr(e))
+
+    return {
+        "success": True,
+        "message": f"New verification code sent to {user.email}"
     }
 
 
