@@ -31,6 +31,12 @@ api_router.include_router(
 )
 
 api_router.include_router(
+    auth_router,
+    prefix="",
+    include_in_schema=False
+)
+
+api_router.include_router(
     users_router,
     prefix="/users",
     tags=["Users"]

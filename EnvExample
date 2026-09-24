@@ -1,0 +1,6 @@
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=example@example.com
+SMTP_PASSWORD=example
+SMTP_FROM_NAME="TEE Devoloper Team"
+SMTP_FROM_EMAIL=example@example.com
