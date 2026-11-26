@@ -1,8 +1,91 @@
 __pycache__/
 *.pyc
 __pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# ==============================
+# Virtual environments
+# ==============================
 venv/
 .venv/
-.env
-app
+env/
+ENV/
+
+# ==============================
+# IDEs and editors
+# ==============================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==============================
+# Testing & coverage
+# ==============================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ==============================
+# Build & distribution
+# ==============================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ==============================
+# Logs
+# ==============================
+*.log
+logs/
+
+# ==============================
+# Uploaded detection images
+# ==============================
 uploads/
+media/
+temp/
+
+# ==============================
+# ML temporary files
+# ==============================
+*.h5.tmp
+*.keras.tmp
+*.onnx.tmp
+*.pt.tmp
+*.pth.tmp
+checkpoints/
+wandb/
+
+# ==============================
+# Jupyter
+# ==============================
+.ipynb_checkpoints/
+
+# ==============================
+# OS files
+# ==============================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==============================
+# Database files (local only)
+# ==============================
+*.db
+*.sqlite
+*.sqlite3
+
+# ==============================
+# Temporary files
+# ==============================
+*.tmp
+*.bak
+*.old
+
