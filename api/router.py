@@ -8,6 +8,8 @@ from app.api.routes.workers.workers import router as workers_router
 from app.api.routes.tasks.tasks import router as tasks_router
 from app.api.routes.attendance.attendance import router as attendance_router
 from app.api.routes.users.test_auth import router as test_auth_router
+from app.api.routes.dashboard.dashboard import router as dashboard_router
+from app.api.routes.users.activity_logs import router as activity_logs_router
 
 
 api_router = APIRouter()
@@ -28,12 +30,6 @@ api_router.include_router(
     auth_router,
     prefix="/auth",
     tags=["Authentication"]
-)
-
-api_router.include_router(
-    auth_router,
-    prefix="",
-    include_in_schema=False
 )
 
 api_router.include_router(
@@ -64,4 +60,16 @@ api_router.include_router(
     attendance_router,
     prefix="/attendance",
     tags=["Attendance"]
+)
+
+api_router.include_router(
+    dashboard_router,
+    prefix="/dashboard",
+    tags=["Dashboard"]
+)
+
+api_router.include_router(
+    activity_logs_router,
+    prefix="/activity-logs",
+    tags=["Activity Logs"]
 )

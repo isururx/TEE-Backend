@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from secrets import randbelow
@@ -24,9 +24,40 @@ router = APIRouter()
 # }
 otp_store = {}
 
+
 class Verify2FARequest(BaseModel):
     user_id: int
     otp: str
+
+
+class ResendOtpRequest(BaseModel):
+    user_id: int
+    method: str = "email"
+
+
+def _mask_email(email: str) -> str:
+    if not email or "@" not in email:
+        return "user***@gmail.com"
+    local, domain = email.split("@", 1)
+    prefix = local[:3] if len(local) >= 3 else local[:1]
+    return f"{prefix}***@{domain}"
+
+
+def _mask_phone(phone: str) -> str:
+    if not phone:
+        return "Not set"
+    cleaned = phone.strip()
+    if len(cleaned) <= 4:
+        return cleaned
+    return f"{cleaned[:3]} *** {cleaned[-4:]}"
+
+
+def _send_otp_email_bg(recipient_email: str, otp: str) -> None:
+    try:
+        send_otp_email(recipient_email=recipient_email, otp=otp)
+    except Exception as e:
+        print("Background email sending error:", repr(e))
+
 
 @router.post("/verify-2fa")
 async def verify_2fa(
@@ -75,9 +106,6 @@ async def verify_2fa(
     # OTP is correct
     otp_store.pop(user.id, None)
 
-    # OTP is correct
-    otp_store.pop(user.id, None)
-
     # Generate JWT only after successful 2FA verification
     access_token = create_access_token(
         user_id=user.id,
@@ -95,9 +123,11 @@ async def verify_2fa(
         "role": user.role
     }
 
+
 @router.post("/login")
 async def login(
     data: LoginRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
 
@@ -140,91 +170,75 @@ async def login(
         "expires_at": expires_at
     }
 
-    # 7. Send OTP through Email (SMTP)
-    try:
-        await send_otp_email(
-            recipient_email=user.email,
-            otp=otp,
-            recipient_name=user.name or "User"
-        )
-    except Exception as e:
-        print("Email sending error:", repr(e))
-
-    # Optional: Send OTP through Text.lk SMS
+    # 7. Send OTP through Text.lk
     # try:
+
     #     sms_message = (
     #         f"TEE verification code: {otp}. "
     #         "This code will expire in 5 minutes."
     #     )
+
     #     sms_response = await send_sms(
     #         recipient=user.phone_num,
     #         message=sms_message
     #     )
+
     #     print("SMS response:", sms_response)
+
     # except Exception as e:
+
+    #     # Remove OTP if SMS failed
+    #     otp_store.pop(user.id, None)
+
     #     print("SMS sending error:", repr(e))
+
+    #     raise HTTPException(
+    #         status_code=500,
+    #         detail="Unable to send verification code"
+    #     )
+
+    # Send OTP via Email in background if configured
+    if user.email:
+        background_tasks.add_task(_send_otp_email_bg, user.email, otp)
 
     # 8. Return response
     return {
         "success": True,
-        "message": f"Verification code sent to {user.email}",
+        "message": "Verification code sent",
         "requires_2fa": True,
         "user_id": user.id,
-        "user": {
-            "id": user.id,
-            "name": user.name,
-            "email": user.email,
-            "phone_num": user.phone_num,
-            "role": user.role
-        }
+        "masked_email": _mask_email(user.email),
+        "masked_phone": _mask_phone(user.phone_num),
     }
-
-
-class ResendOTPRequest(BaseModel):
-    user_id: int | None = None
-    email: str | None = None
 
 
 @router.post("/resend-otp")
 async def resend_otp(
-    data: ResendOTPRequest,
+    data: ResendOtpRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    user = None
-    if data.user_id:
-        user = db.query(User).filter(User.id == data.user_id).first()
-    elif data.email:
-        user = db.query(User).filter(User.email == data.email).first()
-
+    user = db.query(User).filter(User.id == data.user_id).first()
     if not user:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=404, detail="User not found")
 
-    # Generate new OTP
     otp = f"{randbelow(1000000):06d}"
-    print(f"Resent OTP for {user.email} is : {otp}")
+    print("otp Is : " + otp)
 
-    expires_at = datetime.utcnow() + timedelta(minutes=5)
     otp_store[user.id] = {
         "otp": otp,
-        "expires_at": expires_at
+        "expires_at": datetime.utcnow() + timedelta(minutes=5),
     }
 
-    # Dispatch email
-    try:
-        await send_otp_email(
-            recipient_email=user.email,
-            otp=otp,
-            recipient_name=user.name or "User"
-        )
-    except Exception as e:
-        print("Resend email error:", repr(e))
+    method = (data.method or "email").lower()
+    if method == "email":
+        if not user.email:
+            raise HTTPException(status_code=400, detail="User email is not configured")
+        background_tasks.add_task(_send_otp_email_bg, user.email, otp)
+    # For SMS, OTP is printed in terminal above (Text.lk trial disabled)
 
     return {
         "success": True,
-        "message": f"New verification code sent to {user.email}"
+        "message": f"Verification code sent via {method}",
+        "method": method,
     }
-
-
