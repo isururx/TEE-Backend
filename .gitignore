@@ -1,14 +1,5 @@
-
-# ==============================
-# Environment variables & secrets
-# ==============================
-.env
-.env.*
-!.env.example
-
-# ==============================
-# Python cache
-# ==============================
+__pycache__/
+*.pyc
 __pycache__/
 *.py[cod]
 *$py.class
