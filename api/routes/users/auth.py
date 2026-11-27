@@ -40,7 +40,7 @@ password_reset_tokens = {}
 
 class Verify2FARequest(BaseModel):
     challenge_id: str = Field(min_length=20, max_length=128)
-    otp: str = Field(min_length=6, max_length=6, pattern=r"^\\d{6}$")
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class ResendOtpRequest(BaseModel):
