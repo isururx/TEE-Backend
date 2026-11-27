@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.api.dependencies.auth import get_current_user
 
 from app.api.routes.detection.detection import router as detection_router
 from app.api.routes.users.auth import router as auth_router
@@ -23,7 +25,8 @@ api_router.include_router(
 api_router.include_router(
     detection_router,
     prefix="/detection",
-    tags=["Disease Detection"]
+    tags=["Disease Detection"],
+    dependencies=[Depends(get_current_user)]
 )
 
 api_router.include_router(
@@ -35,41 +38,48 @@ api_router.include_router(
 api_router.include_router(
     users_router,
     prefix="/users",
-    tags=["Users"]
+    tags=["Users"],
+    dependencies=[Depends(get_current_user)]
 )
 
 api_router.include_router(
     blocks_router,
     prefix="/blocks",
-    tags=["Plantation Blocks"]
+    tags=["Plantation Blocks"],
+    dependencies=[Depends(get_current_user)]
 )
 
 api_router.include_router(
     workers_router,
     prefix="/workers",
-    tags=["Workers"]
+    tags=["Workers"],
+    dependencies=[Depends(get_current_user)]
 )
 
 api_router.include_router(
     tasks_router,
     prefix="/tasks",
-    tags=["Tasks"]
+    tags=["Tasks"],
+    dependencies=[Depends(get_current_user)]
 )
 
 api_router.include_router(
     attendance_router,
     prefix="/attendance",
-    tags=["Attendance"]
+    tags=["Attendance"],
+    dependencies=[Depends(get_current_user)]
 )
 
 api_router.include_router(
     dashboard_router,
     prefix="/dashboard",
-    tags=["Dashboard"]
+    tags=["Dashboard"],
+    dependencies=[Depends(get_current_user)]
 )
 
 api_router.include_router(
     activity_logs_router,
     prefix="/activity-logs",
-    tags=["Activity Logs"]
+    tags=["Activity Logs"],
+    dependencies=[Depends(get_current_user)]
 )
