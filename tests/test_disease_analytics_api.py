@@ -129,6 +129,7 @@ class DiseaseAnalyticsApiTestCase(unittest.TestCase):
             [item["disease_name"] for item in data["disease_distribution"]],
             ["Brown Blight", "Gray Blight"],
         )
+        self.assertEqual(data["disease_distribution"][0]["affected_blocks"], 1)
 
     def test_block_summary_requires_block_and_includes_zero_count_block(self):
         response = self.client.get(
