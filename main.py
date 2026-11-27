@@ -2,12 +2,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.db.database import engine
+from app.db.models.auth_challenge import AuthChallenge
 
 
 app = FastAPI(
     title="TEE Backend",
     version="1.0.0"
 )
+
+
+@app.on_event('startup')
+def ensure_auth_challenge_table():
+    AuthChallenge.__table__.create(bind=engine, checkfirst=True)
 
 
 app.add_middleware(
