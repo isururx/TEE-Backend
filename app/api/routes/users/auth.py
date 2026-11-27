@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from secrets import randbelow, token_urlsafe
 from hashlib import sha256
-from hmac import compare_digest
+from hmac import compare_digest, new as hmac_new
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.api.dependencies.auth import get_current_user
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import _require_secret, create_access_token, hash_password, verify_password
 from app.db.database import get_db
 from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.user import User
@@ -51,7 +51,7 @@ def _expired(value):
     return _utcnow() >= value
 
 def _otp_digest(otp: str) -> str:
-    return sha256(otp.encode('utf-8')).hexdigest()
+    return hmac_new(_require_secret().encode('utf-8'), otp.encode('utf-8'), sha256).hexdigest()
 
 def _mask_email(email: str) -> str:
     local, domain = email.split('@', 1)
@@ -91,8 +91,11 @@ async def login(data: LoginRequest, db: Session = Depends(get_db)):
     if not user.password.startswith('$argon2id$'):
         user.password = hash_password(data.password)
         db.commit()
-    otp = _issue_otp()
     now = _utcnow()
+    previous = db.query(AuthChallenge).filter(AuthChallenge.purpose == 'login', AuthChallenge.destination == str(user.id)).first()
+    if previous and previous.last_sent_at and now - (previous.last_sent_at.replace(tzinfo=timezone.utc) if previous.last_sent_at.tzinfo is None else previous.last_sent_at) < RESEND_COOLDOWN:
+        raise HTTPException(status_code=429, detail='Please wait before requesting another verification code')
+    otp = _issue_otp()
     _replace_challenge(db, 'login', str(user.id), user.id, _otp_digest(otp), None, now + OTP_TTL, now)
     await _send_login_otp(user, otp, db)
     return {'success': True, 'requires_2fa': True, 'user_id': user.id, 'masked_email': _mask_email(user.email), 'message': 'Verification code sent'}
