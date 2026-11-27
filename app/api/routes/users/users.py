@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
+from app.api.dependencies.auth import get_current_user
 from app.db.database import get_db
 from app.db.models.activity_log import ActivityLog
 from app.db.models.user import User
@@ -10,6 +11,12 @@ from app.db.models.worker import Worker
 from app.schemas.user import UserResponse
 
 router = APIRouter()
+
+
+def require_admin(current_user: User = Depends(get_current_user)):
+    if 'admin' not in (current_user.role or '').lower():
+        raise HTTPException(status_code=403, detail='Administrator access required')
+    return current_user
 
 
 class UserProfileUpdate(BaseModel):
@@ -48,7 +55,7 @@ def _log_activity(db: Session, user_id: Optional[int], action: str, details: str
     db.add(ActivityLog(user_id=user_id, action=action, details=details))
 
 
-@router.get("", response_model=List[UserResponse])
+@router.get("", response_model=List[UserResponse], dependencies=[Depends(require_admin)])
 def get_users(
     role: Optional[str] = Query(None),
     db: Session = Depends(get_db)
@@ -61,7 +68,9 @@ def get_users(
 
 
 @router.get("/{user_id}")
-def get_user_profile(user_id: int, db: Session = Depends(get_db)):
+def get_user_profile(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if user_id != current_user.id and "admin" not in (current_user.role or "").lower():
+        raise HTTPException(status_code=403, detail="You can only view your own profile")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -70,7 +79,11 @@ def get_user_profile(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{user_id}")
-def update_user_profile(user_id: int, data: UserProfileUpdate, db: Session = Depends(get_db)):
+def update_user_profile(user_id: int, data: UserProfileUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if user_id != current_user.id and "admin" not in (current_user.role or "").lower():
+        raise HTTPException(status_code=403, detail="You can only update your own profile")
+    if data.role is not None and "admin" not in (current_user.role or "").lower():
+        raise HTTPException(status_code=403, detail="Only administrators can change roles")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -106,7 +119,7 @@ def update_user_profile(user_id: int, data: UserProfileUpdate, db: Session = Dep
     return _serialize_user_profile(user, worker)
 
 
-@router.patch("/{user_id}/role")
+@router.patch("/{user_id}/role", dependencies=[Depends(require_admin)])
 def update_user_role(user_id: int, data: UserRoleUpdate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -120,7 +133,7 @@ def update_user_role(user_id: int, data: UserRoleUpdate, db: Session = Depends(g
     return _serialize_user_profile(user, worker)
 
 
-@router.patch("/{user_id}/status")
+@router.patch("/{user_id}/status", dependencies=[Depends(require_admin)])
 def update_user_status(user_id: int, data: UserStatusUpdate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
