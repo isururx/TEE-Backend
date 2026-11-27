@@ -1,3 +1,4 @@
+from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.user import User
 from app.db.models.disease import Disease
 from app.db.models.treatment import Treatment
@@ -14,6 +15,7 @@ from app.db.models.inventory_movement import InventoryMovement
 from app.db.models.activity_log import ActivityLog
 
 __all__ = [
+    "AuthChallenge",
     "User",
     "Disease",
     "Treatment",
