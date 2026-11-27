@@ -179,6 +179,7 @@ def get_disease_analytics_summary(
             Disease.id.label("disease_id"),
             Disease.name.label("disease_name"),
             func.count(DiseaseDetection.id).label("frequency"),
+            func.count(func.distinct(DiseaseDetection.block_id)).label("affected_blocks"),
         )
         .join(Disease, Disease.id == DiseaseDetection.disease_id)
         .filter(func.lower(func.trim(Disease.name)) != HEALTHY_DISEASE_LABEL)
@@ -196,6 +197,7 @@ def get_disease_analytics_summary(
             "disease_id": row.disease_id,
             "disease_name": row.disease_name,
             "frequency": int(row.frequency),
+            "affected_blocks": int(row.affected_blocks or 0),
         }
         for row in distribution_rows
     ]
