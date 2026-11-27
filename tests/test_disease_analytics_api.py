@@ -198,5 +198,109 @@ class DiseaseAnalyticsApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+    def test_one_disease_across_multiple_blocks_counts_affected_blocks(self):
+        self.db.add(
+            DiseaseDetection(
+                disease_id=1, user_id=1, block_id=2,
+                image_path="test-block-2.jpg", confidence_score=0.88,
+                timestamp=datetime(2026, 11, 14, 9, 30),
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get("/api/analytics/disease-distribution")
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        brown_blight = next(
+            item for item in response.json()["disease_distribution"]
+            if item["disease_name"] == "Brown Blight"
+        )
+        # Two attributed detections plus one unassigned event.
+        self.assertEqual(brown_blight["frequency"], 3)
+        self.assertEqual(brown_blight["affected_blocks"], 2)
+
+    def test_no_detections_in_selected_period_returns_zero_values(self):
+        response = self.client.get(
+            "/api/analytics/disease-frequency-by-block",
+            params={"start_date": "2026-12-01", "end_date": "2026-12-02"},
+        )
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        data = response.json()
+        self.assertEqual(data["summary"]["total_detections"], 0)
+        self.assertEqual(data["summary"]["diseased_detections"], 0)
+        self.assertEqual(data["summary"]["healthy_detections"], 0)
+        self.assertEqual(data["summary"]["unassigned_detections"], 0)
+        self.assertEqual(data["blocks"], [
+            {
+                "block_id": 1, "block_name": "Block 1",
+                "total_detections": 0, "diseases": [],
+            },
+            {
+                "block_id": 2, "block_name": "Block 2",
+                "total_detections": 0, "diseases": [],
+            },
+        ])
+
+    def test_healthy_events_are_separate_from_disease_frequency(self):
+        response = self.client.get(
+            "/api/analytics/block-disease-summary",
+            params={"block_id": 1},
+        )
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        block = response.json()["block"]
+        self.assertEqual(block["total_detections"], 3)
+        self.assertEqual(block["healthy_detections"], 1)
+        self.assertEqual(block["diseased_detections"], 2)
+        self.assertNotIn(
+            "Healthy leaf",
+            [item["disease_name"] for item in block["diseases"]],
+        )
+
+    def test_unassigned_events_are_not_attributed_to_any_block(self):
+        response = self.client.get("/api/analytics/disease-frequency-by-block")
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        data = response.json()
+        attributed_total = sum(block["total_detections"] for block in data["blocks"])
+        self.assertEqual(data["summary"]["total_detections"], 4)
+        self.assertEqual(data["summary"]["unassigned_detections"], 1)
+        self.assertEqual(attributed_total, 3)
+
+    def test_date_range_includes_both_calendar_day_boundaries(self):
+        self.db.add_all([
+            DiseaseDetection(
+                disease_id=1, user_id=1, block_id=2,
+                image_path="end-of-day.jpg", confidence_score=0.91,
+                timestamp=datetime(2026, 11, 27, 23, 59, 59, 999999),
+            ),
+            DiseaseDetection(
+                disease_id=1, user_id=1, block_id=2,
+                image_path="next-day.jpg", confidence_score=0.91,
+                timestamp=datetime(2026, 11, 28, 0, 0, 0),
+            ),
+        ])
+        self.db.commit()
+
+        response = self.client.get(
+            "/api/analytics/disease-frequency-by-block",
+            params={"start_date": "2026-11-27", "end_date": "2026-11-27"},
+        )
+        self.assertEqual(response.status_code, 200, msg=response.text)
+        data = response.json()
+        self.assertEqual(data["summary"]["total_detections"], 1)
+        self.assertEqual(data["blocks"][0]["total_detections"], 0)
+        self.assertEqual(data["blocks"][1]["total_detections"], 1)
+
+    def test_inactive_user_cannot_access_disease_analytics(self):
+        inactive_manager = User(
+            id=5, name="Inactive Manager", email="inactive-manager@tee.lk",
+            password="test", role="Manager", is_active=False,
+        )
+        self.db.add(inactive_manager)
+        self.db.commit()
+        self.current_user = inactive_manager
+
+        response = self.client.get("/api/analytics/disease-frequency-by-block")
+        self.assertEqual(response.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()
