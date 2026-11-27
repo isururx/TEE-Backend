@@ -1,244 +1,170 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from datetime import datetime, timedelta, timezone
+from secrets import randbelow, token_urlsafe
+from hashlib import sha256
+from hmac import compare_digest
+from typing import Dict, Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from secrets import randbelow
-from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
+
+from app.core.security import create_access_token, hash_password, verify_password
 from app.db.database import get_db
 from app.db.models.user import User
 from app.schemas.auth import LoginRequest
-from app.services.sms_service import send_sms
-from app.services.email_service import send_otp_email
-from app.services import worker_service
-from app.core.security import create_access_token
-
+from app.services.email_service import send_otp_email, send_password_reset_otp_email
 
 router = APIRouter()
-
-
-# Temporary OTP storage
-# {
-#     user_id: {
-#         "otp": "123456",
-#         "expires_at": datetime
-#     }
-# }
-otp_store = {}
-
+OTP_TTL = timedelta(minutes=5)
+RESET_TOKEN_TTL = timedelta(minutes=10)
+MAX_OTP_ATTEMPTS = 5
+RESEND_COOLDOWN = timedelta(seconds=60)
+login_challenges: Dict[int, Dict[str, Any]] = {}
+reset_challenges: Dict[str, Dict[str, Any]] = {}
+reset_tokens: Dict[str, Dict[str, Any]] = {}
 
 class Verify2FARequest(BaseModel):
     user_id: int
-    otp: str
-
+    otp: str = Field(min_length=6, max_length=6, pattern=r'^\d{6}$')
 
 class ResendOtpRequest(BaseModel):
     user_id: int
-    method: str = "email"
+    method: str = 'email'
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class VerifyResetOtpRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(min_length=6, max_length=6, pattern=r'^\d{6}$')
+
+class ResetPasswordRequest(BaseModel):
+    reset_token: str = Field(min_length=20, max_length=256)
+    new_password: str = Field(min_length=10, max_length=128)
+
+def _utcnow():
+    return datetime.now(timezone.utc)
+
+def _otp_digest(otp: str) -> str:
+    return sha256(otp.encode('utf-8')).hexdigest()
 
 def _mask_email(email: str) -> str:
-    if not email or "@" not in email:
-        return "user***@gmail.com"
-    local, domain = email.split("@", 1)
-    prefix = local[:3] if len(local) >= 3 else local[:1]
-    return f"{prefix}***@{domain}"
+    local, domain = email.split('@', 1)
+    return f'{local[:1]}***@{domain}'
 
+def _issue_otp() -> str:
+    return f'{randbelow(1_000_000):06d}'
 
-def _mask_phone(phone: str) -> str:
-    if not phone:
-        return "Not set"
-    cleaned = phone.strip()
-    if len(cleaned) <= 4:
-        return cleaned
-    return f"{cleaned[:3]} *** {cleaned[-4:]}"
+def _check_password_policy(password: str):
+    if not any(c.islower() for c in password) or not any(c.isupper() for c in password) or not any(c.isdigit() for c in password):
+        raise HTTPException(status_code=422, detail='Password must contain an uppercase letter, a lowercase letter and a number')
 
-
-def _send_otp_email_bg(recipient_email: str, otp: str) -> None:
+async def _send_login_otp(user: User, otp: str):
+    if not user.email:
+        raise HTTPException(status_code=400, detail='No email address is configured for this account')
     try:
-        send_otp_email(recipient_email=recipient_email, otp=otp)
-    except Exception as e:
-        print("Background email sending error:", repr(e))
+        await run_in_threadpool(send_otp_email, user.email, otp)
+    except Exception as exc:
+        login_challenges.pop(user.id, None)
+        raise HTTPException(status_code=503, detail='Unable to send the verification email. Please try again later.') from exc
 
+@router.post('/login')
+async def login(data: LoginRequest, db: Session = Depends(get_db)):
+    identifier = data.username.strip().lower()
+    user = db.query(User).filter(or_(func.lower(User.name) == identifier, func.lower(User.email) == identifier)).first()
+    if not user or not user.is_active or not verify_password(data.password, user.password):
+        raise HTTPException(status_code=401, detail='Invalid username or password')
+    if not user.email:
+        raise HTTPException(status_code=400, detail='An email address is required for login verification')
+    if not user.password.startswith('pbkdf2_sha256$'):
+        user.password = hash_password(data.password)
+        db.commit()
+    otp = _issue_otp()
+    now = _utcnow()
+    login_challenges[user.id] = {'otp_hash': _otp_digest(otp), 'expires_at': now + OTP_TTL, 'attempts': 0, 'last_sent_at': now}
+    await _send_login_otp(user, otp)
+    return {'success': True, 'requires_2fa': True, 'user_id': user.id, 'masked_email': _mask_email(user.email), 'message': 'Verification code sent'}
 
-@router.post("/verify-2fa")
-async def verify_2fa(
-    data: Verify2FARequest,
-    db: Session = Depends(get_db)
-):
-
-    # Find user
-    user = db.query(User).filter(
-        User.id == data.user_id
-    ).first()
-
-    if not user:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found"
-        )
-
-    # Get stored OTP
-    stored_otp = otp_store.get(user.id)
-
-    if not stored_otp:
-        raise HTTPException(
-            status_code=401,
-            detail="No active verification code"
-        )
-
-    # Check expiration
-    if datetime.utcnow() > stored_otp["expires_at"]:
-
-        otp_store.pop(user.id, None)
-
-        raise HTTPException(
-            status_code=401,
-            detail="Verification code has expired"
-        )
-
-    # Check OTP
-    if data.otp != stored_otp["otp"]:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid verification code"
-        )
-
-    # OTP is correct
-    otp_store.pop(user.id, None)
-
-    # Generate JWT only after successful 2FA verification
-    access_token = create_access_token(
-        user_id=user.id,
-        role=user.role
-    )
-
-    return {
-        "success": True,
-        "message": "2FA verification successful",
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user_id": user.id,
-        "name": user.name,
-        "email": user.email,
-        "role": user.role
-    }
-
-
-@router.post("/login")
-async def login(
-    data: LoginRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-
-    # 1. Find user
-    user = db.query(User).filter(
-        User.name == data.username
-    ).first()
-
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password"
-        )
-
-    # 2. Check account status
-    if not user.is_active:
-        raise HTTPException(
-            status_code=403,
-            detail="User account is inactive"
-        )
-
-    # 3. Check password
-    # Temporary plaintext comparison
-    if user.password != data.password:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password"
-        )
-
-    # 4. Generate 6-digit OTP
-    otp = f"{randbelow(1000000):06d}"
-    print("otp Is : " + otp)
-
-    # 5. Set OTP expiry to 5 minutes
-    expires_at = datetime.utcnow() + timedelta(minutes=5)
-
-    # 6. Store OTP
-    otp_store[user.id] = {
-        "otp": otp,
-        "expires_at": expires_at
-    }
-
-    # 7. Send OTP through Text.lk
-    # try:
-
-    #     sms_message = (
-    #         f"TEE verification code: {otp}. "
-    #         "This code will expire in 5 minutes."
-    #     )
-
-    #     sms_response = await send_sms(
-    #         recipient=user.phone_num,
-    #         message=sms_message
-    #     )
-
-    #     print("SMS response:", sms_response)
-
-    # except Exception as e:
-
-    #     # Remove OTP if SMS failed
-    #     otp_store.pop(user.id, None)
-
-    #     print("SMS sending error:", repr(e))
-
-    #     raise HTTPException(
-    #         status_code=500,
-    #         detail="Unable to send verification code"
-    #     )
-
-    # Send OTP via Email in background if configured
-    if user.email:
-        background_tasks.add_task(_send_otp_email_bg, user.email, otp)
-
-    # 8. Return response
-    return {
-        "success": True,
-        "message": "Verification code sent",
-        "requires_2fa": True,
-        "user_id": user.id,
-        "masked_email": _mask_email(user.email),
-        "masked_phone": _mask_phone(user.phone_num),
-    }
-
-
-@router.post("/resend-otp")
-async def resend_otp(
-    data: ResendOtpRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
+@router.post('/verify-2fa')
+async def verify_2fa(data: Verify2FARequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == data.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    challenge = login_challenges.get(data.user_id)
+    if not user or not user.is_active or not challenge:
+        raise HTTPException(status_code=401, detail='Verification session is invalid or expired')
+    if _utcnow() >= challenge['expires_at']:
+        login_challenges.pop(data.user_id, None)
+        raise HTTPException(status_code=401, detail='Verification code has expired')
+    challenge['attempts'] += 1
+    if challenge['attempts'] > MAX_OTP_ATTEMPTS:
+        login_challenges.pop(data.user_id, None)
+        raise HTTPException(status_code=429, detail='Too many incorrect verification attempts')
+    if not compare_digest(_otp_digest(data.otp), challenge['otp_hash']):
+        raise HTTPException(status_code=401, detail='Invalid verification code')
+    login_challenges.pop(data.user_id, None)
+    token = create_access_token(user_id=user.id, role=user.role)
+    return {'success': True, 'message': '2FA verification successful', 'access_token': token, 'token_type': 'bearer', 'user_id': user.id, 'name': user.name, 'email': user.email, 'role': user.role}
 
-    otp = f"{randbelow(1000000):06d}"
-    print("otp Is : " + otp)
+@router.post('/resend-otp')
+async def resend_otp(data: ResendOtpRequest, db: Session = Depends(get_db)):
+    if data.method.lower() != 'email':
+        raise HTTPException(status_code=400, detail='Only email verification is currently supported')
+    user = db.query(User).filter(User.id == data.user_id).first()
+    if not user or not user.is_active or not user.email:
+        raise HTTPException(status_code=400, detail='Unable to resend verification code')
+    now = _utcnow()
+    existing = login_challenges.get(user.id)
+    if existing and now - existing['last_sent_at'] < RESEND_COOLDOWN:
+        raise HTTPException(status_code=429, detail='Please wait before requesting another code')
+    otp = _issue_otp()
+    login_challenges[user.id] = {'otp_hash': _otp_digest(otp), 'expires_at': now + OTP_TTL, 'attempts': 0, 'last_sent_at': now}
+    await _send_login_otp(user, otp)
+    return {'success': True, 'message': 'Verification code sent', 'method': 'email'}
 
-    otp_store[user.id] = {
-        "otp": otp,
-        "expires_at": datetime.utcnow() + timedelta(minutes=5),
-    }
+@router.post('/forgot-password')
+async def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    email = data.email.strip().lower()
+    user = db.query(User).filter(func.lower(User.email) == email).first()
+    if user and user.is_active:
+        otp = _issue_otp()
+        reset_challenges[email] = {'user_id': user.id, 'otp_hash': _otp_digest(otp), 'expires_at': _utcnow() + OTP_TTL, 'attempts': 0, 'last_sent_at': _utcnow()}
+        try:
+            await run_in_threadpool(send_password_reset_otp_email, user.email, otp)
+        except Exception as exc:
+            reset_challenges.pop(email, None)
+            raise HTTPException(status_code=503, detail='Unable to send the password reset email. Please try again later.') from exc
+    return {'success': True, 'message': 'If the account exists, a reset code has been sent.'}
 
-    method = (data.method or "email").lower()
-    if method == "email":
-        if not user.email:
-            raise HTTPException(status_code=400, detail="User email is not configured")
-        background_tasks.add_task(_send_otp_email_bg, user.email, otp)
-    # For SMS, OTP is printed in terminal above (Text.lk trial disabled)
+@router.post('/verify-reset-otp')
+async def verify_reset_otp(data: VerifyResetOtpRequest):
+    email = data.email.strip().lower()
+    challenge = reset_challenges.get(email)
+    if not challenge or _utcnow() >= challenge['expires_at']:
+        reset_challenges.pop(email, None)
+        raise HTTPException(status_code=401, detail='Invalid or expired verification code')
+    challenge['attempts'] += 1
+    if challenge['attempts'] > MAX_OTP_ATTEMPTS:
+        reset_challenges.pop(email, None)
+        raise HTTPException(status_code=429, detail='Too many incorrect verification attempts')
+    if not compare_digest(_otp_digest(data.otp), challenge['otp_hash']):
+        raise HTTPException(status_code=401, detail='Invalid or expired verification code')
+    reset_challenges.pop(email, None)
+    reset_token = token_urlsafe(32)
+    reset_tokens[sha256(reset_token.encode('utf-8')).hexdigest()] = {'user_id': challenge['user_id'], 'expires_at': _utcnow() + RESET_TOKEN_TTL}
+    return {'success': True, 'reset_token': reset_token}
 
-    return {
-        "success": True,
-        "message": f"Verification code sent via {method}",
-        "method": method,
-    }
+@router.post('/reset-password')
+async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
+    _check_password_policy(data.new_password)
+    token_hash = sha256(data.reset_token.encode('utf-8')).hexdigest()
+    token_data = reset_tokens.pop(token_hash, None)
+    if not token_data or _utcnow() >= token_data['expires_at']:
+        raise HTTPException(status_code=401, detail='Password reset session is invalid or expired')
+    user = db.query(User).filter(User.id == token_data['user_id']).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=400, detail='Unable to reset password')
+    user.password = hash_password(data.new_password)
+    db.commit()
+    login_challenges.pop(user.id, None)
+    return {'success': True, 'message': 'Password reset successfully'}
