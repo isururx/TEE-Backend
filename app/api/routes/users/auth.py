@@ -168,3 +168,16 @@ async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_d
     db.commit()
     login_challenges.pop(user.id, None)
     return {'success': True, 'message': 'Password reset successfully'}
+
+from app.api.dependencies.auth import get_current_user
+
+@router.get('/me')
+def get_authenticated_user(current_user: User = Depends(get_current_user)):
+    return {
+        'id': current_user.id,
+        'user_id': current_user.id,
+        'name': current_user.name,
+        'email': current_user.email,
+        'role': current_user.role,
+        'is_active': current_user.is_active,
+    }
