@@ -3,6 +3,7 @@ from sqlalchemy import text
 from typing import List, Optional
 from fastapi import HTTPException
 
+from app.core.password import hash_password
 from app.db.models.worker import Worker
 from app.db.models.user import User
 from app.db.models.plantation_block import PlantationBlock
@@ -82,37 +83,34 @@ def register_new_worker(db: Session, data: WorkerCreate) -> dict:
         if not block:
             raise HTTPException(status_code=400, detail=f"Block {data.assigned_block} not found")
 
-    # Sync sequence to ensure nextval is greater than current max(id)
     _sync_sequence(db, "users")
+    password_hash = hash_password(data.password)
 
-    # 1. Create User row in users table first
     new_user = User(
         name=data.name,
         email=data.email,
         phone_num=str(data.phone_num),
-        password=data.password,
+        password=password_hash,
         role="Worker",
         is_active=True,
     )
     db.add(new_user)
     try:
-        db.flush()  # Generates new_user.id
+        db.flush()
     except Exception:
         db.rollback()
-        # Force re-sync sequence and retry
         _sync_sequence(db, "users")
         new_user = User(
             name=data.name,
             email=data.email,
             phone_num=str(data.phone_num),
-            password=data.password,
+            password=password_hash,
             role="Worker",
             is_active=True,
         )
         db.add(new_user)
         db.flush()
 
-    # 2. Create Worker row with id = new_user.id
     new_worker = Worker(
         id=new_user.id,
         name=data.name,
@@ -122,14 +120,13 @@ def register_new_worker(db: Session, data: WorkerCreate) -> dict:
         email=data.email,
         phone_num=data.phone_num,
         assigned_block=data.assigned_block,
-        password=data.password,
+        password=password_hash,
     )
     db.add(new_worker)
     db.commit()
     db.refresh(new_worker)
 
     return format_worker(new_worker, db)
-
 
 
 def update_worker_profile(db: Session, worker_id: int, data: WorkerUpdate) -> dict:
@@ -160,9 +157,10 @@ def update_worker_profile(db: Session, worker_id: int, data: WorkerUpdate) -> di
     if data.assigned_block is not None:
         worker.assigned_block = data.assigned_block
     if data.password is not None:
-        worker.password = data.password
+        password_hash = hash_password(data.password)
+        worker.password = password_hash
         if user:
-            user.password = data.password
+            user.password = password_hash
 
     db.commit()
     db.refresh(worker)
@@ -175,10 +173,8 @@ def delete_worker_profile(db: Session, worker_id: int) -> None:
         raise HTTPException(status_code=404, detail=f"Worker {worker_id} not found")
 
     user = db.query(User).filter(User.id == worker_id).first()
-
     db.delete(worker)
     if user:
         db.delete(user)
     db.commit()
     return None
-

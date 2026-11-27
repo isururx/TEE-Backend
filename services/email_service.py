@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def send_otp_email(recipient_email: str, otp: str) -> None:
-    """Send a 6-digit 2FA OTP verification email via SMTP STARTTLS."""
+def send_otp_email(recipient_email: str, otp: str, purpose: str = "2FA") -> None:
+    """Send a six-digit OTP email through the configured SMTP server."""
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER")
@@ -18,12 +18,19 @@ def send_otp_email(recipient_email: str, otp: str) -> None:
     if not smtp_user or not smtp_password:
         raise RuntimeError("SMTP credentials are not configured")
 
+    if purpose == "password reset":
+        subject = "TEE Estate System - Password Reset Code"
+        intro = "Use this code to reset your TEE Estate System password:"
+    else:
+        subject = "TEE Estate System - Your 2FA Verification Code"
+        intro = "Your TEE Estate System verification code is:"
+
     msg = EmailMessage()
-    msg["Subject"] = "TEE Estate System - Your 2FA Verification Code"
+    msg["Subject"] = subject
     msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = recipient_email
     msg.set_content(
-        f"Your TEE Estate System verification code is: {otp}\n\n"
+        f"{intro} {otp}\n\n"
         "This code will expire in 5 minutes.\n"
         "If you did not request this code, please ignore this email."
     )

@@ -1,3 +1,5 @@
+import hmac
+
 from argon2 import PasswordHasher
 from argon2.exceptions import (
     InvalidHashError,
@@ -16,20 +18,26 @@ def hash_password(password: str) -> str:
     return password_hasher.hash(password)
 
 
-def verify_password(password: str, stored_hash: str) -> bool:
-    """Check a plain-text password against an Argon2 hash."""
-    if not password or not stored_hash:
+def verify_password(password: str, stored_password: str) -> bool:
+    """Verify Argon2 hashes and safely support legacy plain-text passwords."""
+    if not password or not stored_password:
         return False
 
+    if not stored_password.startswith("$argon2"):
+        return hmac.compare_digest(password, stored_password)
+
     try:
-        return password_hasher.verify(stored_hash, password)
+        return password_hasher.verify(stored_password, password)
     except (VerifyMismatchError, VerificationError, InvalidHashError):
         return False
 
 
-def needs_rehash(stored_hash: str) -> bool:
-    """Return True when the stored Argon2 hash uses outdated parameters."""
+def needs_rehash(stored_password: str) -> bool:
+    """Return True for legacy passwords or outdated Argon2 parameters."""
+    if not stored_password.startswith("$argon2"):
+        return True
+
     try:
-        return password_hasher.check_needs_rehash(stored_hash)
+        return password_hasher.check_needs_rehash(stored_password)
     except (TypeError, ValueError):
         return True
