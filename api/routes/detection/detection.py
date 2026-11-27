@@ -19,6 +19,23 @@ ALLOWED_IMAGE_CONTENT_TYPES = {
     "image/webp",
 }
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+UNASSIGNED_DETECTION_ROLES = {"admin", "manager", "estate manager"}
+
+
+def _authorize_unassigned_detection(current_user: User) -> None:
+    """Only estate-level administrators/managers may save an unassigned event."""
+    if not getattr(current_user, "is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive.",
+        )
+
+    role = (current_user.role or "").strip().lower()
+    if role not in UNASSIGNED_DETECTION_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an administrator or estate manager may submit an unassigned detection.",
+        )
 
 
 def _authorize_block_access(db: Session, current_user: User, block: PlantationBlock) -> None:
@@ -31,7 +48,7 @@ def _authorize_block_access(db: Session, current_user: User, block: PlantationBl
 
     role = (current_user.role or "").strip().lower()
 
-    if role in {"admin", "manager", "estate manager"}:
+    if role in UNASSIGNED_DETECTION_ROLES:
         return
 
     if role == "supervisor":
@@ -84,33 +101,37 @@ def _validate_uploaded_image(image: UploadFile) -> None:
 @router.post("/detect")
 async def detect_disease(
     image: UploadFile = File(...),
-    block_id: int = Form(...),
+    block_id: int | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     # 1. Validate uploaded file
     _validate_uploaded_image(image)
 
-    # 2. Verify that the selected block exists
-    block = (
-        db.query(PlantationBlock)
-        .filter(PlantationBlock.id == block_id)
-        .first()
-    )
-
-    if not block:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Plantation block not found.",
+    # 2. Validate the selected block, or explicitly authorize an unassigned event
+    block = None
+    if block_id is None:
+        _authorize_unassigned_detection(current_user)
+    else:
+        block = (
+            db.query(PlantationBlock)
+            .filter(PlantationBlock.id == block_id)
+            .first()
         )
 
-    # 3. Enforce role-based authorization for the selected block
-    _authorize_block_access(db, current_user, block)
+        if not block:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Plantation block not found.",
+            )
 
-    # 4. Run detection using the authenticated user and selected block
+        # 3. Enforce role-based authorization for the selected block
+        _authorize_block_access(db, current_user, block)
+
+    # 4. Run detection using the authenticated user and validated block
     return await run_detection(
         image=image,
         user_id=current_user.id,
-        block_id=block.id,
+        block_id=block.id if block else None,
         db=db,
     )

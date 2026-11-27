@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from typing import Optional
@@ -44,15 +44,8 @@ async def run_detection(
     block_id: int | None = None,
     db: Optional[Session] = None,
 ):
-    if block_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Plantation block ID is required.",
-        )
-
-    # -----------------------------
-    # 1. Read & validate uploaded image
-    # -----------------------------
+    # A null block_id is a deliberate unassigned event. The API route applies
+    # role restrictions before reaching this service.
     image_bytes = await image.read()
     if not image_bytes:
         raise HTTPException(
@@ -60,9 +53,7 @@ async def run_detection(
             detail="Uploaded image file is empty.",
         )
 
-    # -----------------------------
-    # 2. Run preprocessing
-    # -----------------------------
+    # 1. Run preprocessing
     try:
         processed_image = preprocess_image(image_bytes)
     except Exception:
@@ -72,9 +63,7 @@ async def run_detection(
             detail="Invalid or corrupted image file.",
         )
 
-    # -----------------------------
-    # 3. Run AI prediction
-    # -----------------------------
+    # 2. Run AI prediction
     try:
         disease_name, confidence = predict_image(processed_image)
     except Exception:
@@ -84,9 +73,7 @@ async def run_detection(
             detail="Disease prediction failed. Please try again.",
         )
 
-    # -----------------------------
-    # 4. Validate disease & save detection record
-    # -----------------------------
+    # 3. Validate disease & save detection record
     session = db if db is not None else SessionLocal()
     owns_session = db is None
     saved_image_path: Optional[Path] = None
@@ -120,7 +107,8 @@ async def run_detection(
             block_id=block_id,
             image_path=str(image_path),
             confidence_score=float(confidence),
-            timestamp=datetime.utcnow(),
+            # Store naive UTC consistently with the existing DateTime column.
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
         )
 
         session.add(detection)
@@ -147,10 +135,7 @@ async def run_detection(
         if owns_session:
             session.close()
 
-    # -----------------------------
-    # 5. Existing response
-    # -----------------------------
-    is_healthy = disease_name.lower() == "healthy leaf"
+    is_healthy = disease_name.strip().lower() == "healthy leaf"
 
     return {
         "detection_id": detection_id,
@@ -164,95 +149,66 @@ async def run_detection(
 
 
 def get_severity(disease_name, confidence):
-
-    if disease_name.lower() == "healthy leaf":
+    if disease_name.strip().lower() == "healthy leaf":
         return "Low"
-
     if confidence >= 0.85:
         return "High"
-
     if confidence >= 0.60:
         return "Moderate"
-
     return "Low"
 
 
 def get_description(disease_name):
-
     descriptions = {
-
-        "Brown Blight":
-            "Signs consistent with brown blight were detected.",
-
-        "Gray Blight":
-            "Signs consistent with gray blight were detected.",
-
-        "Green mirid bug":
-            "Signs consistent with green mirid bug damage were detected.",
-
-        "Healthy leaf":
-            "No visible signs of disease were detected.",
-
-        "Helopeltis":
-            "Signs consistent with Helopeltis damage were detected.",
-
-        "Red spider":
-            "Signs consistent with red spider damage were detected.",
-
-        "Tea algal leaf spot":
-            "Signs consistent with tea algal leaf spot were detected."
+        "Brown Blight": "Signs consistent with brown blight were detected.",
+        "Gray Blight": "Signs consistent with gray blight were detected.",
+        "Green mirid bug": "Signs consistent with green mirid bug damage were detected.",
+        "Healthy leaf": "No visible signs of disease were detected.",
+        "Helopeltis": "Signs consistent with Helopeltis damage were detected.",
+        "Red spider": "Signs consistent with red spider damage were detected.",
+        "Tea algal leaf spot": "Signs consistent with tea algal leaf spot were detected.",
     }
-
     return descriptions.get(
         disease_name,
-        "The model detected a condition requiring further inspection."
+        "The model detected a condition requiring further inspection.",
     )
 
 
 def get_recommendations(disease_name):
-
     recommendations = {
-
         "Healthy leaf": [
             "Continue regular monitoring.",
-            "Maintain current estate management practices."
+            "Maintain current estate management practices.",
         ],
-
         "Brown Blight": [
             "Remove severely affected leaves where appropriate.",
             "Follow the recommended treatment according to estate guidelines.",
-            "Monitor surrounding plants for further infection."
+            "Monitor surrounding plants for further infection.",
         ],
-
         "Gray Blight": [
             "Remove severely affected leaves where appropriate.",
             "Follow the recommended treatment according to estate guidelines.",
-            "Monitor the affected plantation block."
+            "Monitor the affected plantation block.",
         ],
-
         "Green mirid bug": [
             "Inspect surrounding tea plants for further infestation.",
             "Follow the estate's recommended pest management procedure.",
-            "Continue monitoring the affected plantation block."
+            "Continue monitoring the affected plantation block.",
         ],
-
         "Helopeltis": [
             "Inspect surrounding plants for further infestation.",
             "Follow the estate's recommended pest management procedure.",
-            "Monitor the affected plantation block."
+            "Monitor the affected plantation block.",
         ],
-
         "Red spider": [
             "Inspect affected leaves and surrounding plants.",
             "Follow the estate's recommended pest management procedure.",
-            "Continue monitoring for further spread."
+            "Continue monitoring for further spread.",
         ],
-
         "Tea algal leaf spot": [
             "Remove severely affected leaves where appropriate.",
             "Follow the recommended treatment according to estate guidelines.",
-            "Monitor the affected plantation block."
-        ]
+            "Monitor the affected plantation block.",
+        ],
     }
-
     return recommendations.get(disease_name, [])
