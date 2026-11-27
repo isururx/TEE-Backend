@@ -146,8 +146,12 @@ async def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get
     email = data.email.strip().lower()
     user = db.query(User).filter(func.lower(User.email) == email).first()
     if user and user.is_active:
+        now = _utcnow()
+        existing = db.query(AuthChallenge).filter(AuthChallenge.purpose == 'password_reset', AuthChallenge.destination == email).first()
+        if existing and existing.last_sent_at and now - (existing.last_sent_at.replace(tzinfo=timezone.utc) if existing.last_sent_at.tzinfo is None else existing.last_sent_at) < RESEND_COOLDOWN:
+            return {'success': True, 'message': 'If the account exists, a reset code has been sent.'}
         otp = _issue_otp()
-        _replace_challenge(db, 'password_reset', email, user.id, _otp_digest(otp), None, _utcnow() + OTP_TTL, _utcnow())
+        _replace_challenge(db, 'password_reset', email, user.id, _otp_digest(otp), None, now + OTP_TTL, now)
         try:
             await run_in_threadpool(send_password_reset_otp_email, user.email, otp)
         except Exception:
