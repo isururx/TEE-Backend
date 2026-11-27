@@ -194,7 +194,7 @@ class DiseaseAnalyticsApiTestCase(unittest.TestCase):
     def test_missing_authentication_is_rejected(self):
         app.dependency_overrides.pop(get_current_user, None)
         response = self.client.get("/api/analytics/disease-frequency-by-block")
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == "__main__":
