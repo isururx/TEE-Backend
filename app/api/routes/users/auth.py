@@ -132,7 +132,9 @@ async def resend_otp(data: ResendOtpRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail='Unable to resend verification code')
     now = _utcnow()
     existing = db.query(AuthChallenge).filter(AuthChallenge.purpose == 'login', AuthChallenge.destination == str(user.id)).first()
-    if existing and existing.last_sent_at and now - (existing.last_sent_at.replace(tzinfo=timezone.utc) if existing.last_sent_at.tzinfo is None else existing.last_sent_at) < RESEND_COOLDOWN:
+    if not existing:
+        raise HTTPException(status_code=401, detail='No active login verification session')
+    if existing.last_sent_at and now - (existing.last_sent_at.replace(tzinfo=timezone.utc) if existing.last_sent_at.tzinfo is None else existing.last_sent_at) < RESEND_COOLDOWN:
         raise HTTPException(status_code=429, detail='Please wait before requesting another code')
     otp = _issue_otp()
     _replace_challenge(db, 'login', str(user.id), user.id, _otp_digest(otp), None, now + OTP_TTL, now)
