@@ -35,11 +35,11 @@ def _send_branded_otp_email(
     msg["To"] = recipient_email
 
     msg.set_content(
-        f"TEE Estate System\\n"
-        f"{heading}\\n\\n"
-        f"{instruction}\\n\\n"
-        f"Your 6-digit verification code is: {otp}\\n\\n"
-        "This code will expire in 5 minutes.\\n"
+        f"TEE Estate System\n"
+        f"{heading}\n\n"
+        f"{instruction}\n\n"
+        f"Your 6-digit verification code is: {otp}\n\n"
+        "This code will expire in 5 minutes.\n"
         "If you did not request this code, please ignore this email or contact your tea estate system administrator."
     )
 
