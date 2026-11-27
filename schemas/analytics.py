@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
 class AnalyticsPeriod(BaseModel):
@@ -21,6 +21,7 @@ class DiseaseFrequencyItem(BaseModel):
     disease_id: Optional[int] = None
     disease_name: str
     frequency: int
+    affected_blocks: Optional[int] = None
 
 
 class BlockDiseaseFrequency(BaseModel):
