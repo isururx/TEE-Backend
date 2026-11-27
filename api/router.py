@@ -9,6 +9,7 @@ from app.api.routes.tasks.tasks import router as tasks_router
 from app.api.routes.attendance.attendance import router as attendance_router
 from app.api.routes.users.test_auth import router as test_auth_router
 from app.api.routes.dashboard.dashboard import router as dashboard_router
+from app.api.routes.analytics.disease_analytics import router as analytics_router
 from app.api.routes.users.activity_logs import router as activity_logs_router
 
 
@@ -72,4 +73,10 @@ api_router.include_router(
     activity_logs_router,
     prefix="/activity-logs",
     tags=["Activity Logs"]
+)
+
+api_router.include_router(
+    analytics_router,
+    prefix="/analytics",
+    tags=["Disease Analytics"]
 )
