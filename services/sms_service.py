@@ -19,6 +19,9 @@ def format_phone_number(phone_number: str) -> str:
         normalized = value
     elif value.startswith("0"):
         normalized = "94" + value[1:]
+    elif len(value) == 9 and value.startswith("7"):
+        # Worker.phone_num is a legacy BIGINT column; it may have lost the leading zero.
+        normalized = "94" + value
     else:
         raise ValueError("Phone number must be a Sri Lankan number starting with 0 or +94")
 
