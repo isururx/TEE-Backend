@@ -1,8 +1,10 @@
+import os
 from datetime import datetime, timedelta
 from secrets import randbelow, token_urlsafe
 from threading import Lock
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,7 @@ from app.schemas.auth import (
     VerifyResetOtpRequest,
 )
 from app.services.email_service import send_otp_email
+from app.services.sms_service import send_sms
 from app.api.dependencies.auth import get_current_user
 
 router = APIRouter()
@@ -63,36 +66,92 @@ def _mask_phone(phone: str | None) -> str:
     return f"{cleaned[:3]} *** {cleaned[-4:]}" if len(cleaned) > 4 else cleaned
 
 
+def _debug_otp_enabled() -> bool:
+    return os.getenv("OTP_DEBUG_LOG", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _send_otp_email_bg(recipient_email: str, otp: str, purpose: str = "2FA") -> None:
+    """Password-reset compatibility sender. Never prints codes unless debug is enabled."""
+    if _debug_otp_enabled():
+        print(f"[TEE OTP DEBUG] {purpose} code for {recipient_email}: {otp}", flush=True)
     try:
         send_otp_email(recipient_email=recipient_email, otp=otp, purpose=purpose)
     except Exception as exc:
-        # Never log OTP values or SMTP credentials.
-        print("Background email sending error:", type(exc).__name__)
+        print(f"Background email delivery failed ({type(exc).__name__}).", flush=True)
 
 
-def _issue_login_challenge(user: User, background_tasks: BackgroundTasks) -> dict:
-    if not user.email:
+async def _deliver_login_otp(user: User, method: str, otp: str, phone: str | None) -> str:
+    debug_mode = _debug_otp_enabled()
+    destination = user.email if method == "email" else phone
+    if not destination:
+        raise HTTPException(
+            status_code=400,
+            detail="This account does not have a registered " + ("email address" if method == "email" else "phone number"),
+        )
+
+    if debug_mode:
+        # Explicit opt-in only. Do not enable OTP_DEBUG_LOG in production.
+        print(f"[TEE OTP DEBUG] Login OTP ({method}) for user {user.name}: {otp}", flush=True)
+
+    try:
+        if method == "email":
+            await run_in_threadpool(send_otp_email, destination, otp, "2FA")
+        elif method == "sms":
+            await send_sms(destination, f"TEE Estate System verification code: {otp}. Expires in 5 minutes.")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported verification method")
+        return "email" if method == "email" else "sms"
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if debug_mode:
+            print(
+                f"[TEE OTP DEBUG] {method.upper()} delivery unavailable ({type(exc).__name__}); "
+                "using terminal OTP for local testing.",
+                flush=True,
+            )
+            return "console"
+        print(f"OTP {method} delivery failed ({type(exc).__name__}).", flush=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not send the verification code by {method}. Check the server delivery configuration and try again.",
+        ) from exc
+
+
+async def _issue_login_challenge(user: User, method: str, db: Session) -> dict:
+    method = method.lower()
+    if method not in {"email", "sms"}:
+        raise HTTPException(status_code=400, detail="Verification method must be email or sms")
+
+    worker = db.query(Worker).filter(Worker.id == user.id).first()
+    phone = user.phone_num or (str(worker.phone_num) if worker and worker.phone_num else None)
+    if method == "email" and not user.email:
         raise HTTPException(status_code=400, detail="No email address is configured for this account")
+    if method == "sms" and not phone:
+        raise HTTPException(status_code=400, detail="No phone number is configured for this account")
 
     challenge_id = token_urlsafe(32)
     otp = f"{randbelow(1_000_000):06d}"
+    delivery = await _deliver_login_otp(user, method, otp, phone)
     now = datetime.utcnow()
     with _challenge_lock:
         _login_challenges[challenge_id] = {
             "user_id": user.id,
             "otp": otp,
+            "method": method,
             "created_at": now,
             "expires_at": now + timedelta(minutes=5),
             "attempts": 0,
             "last_sent_at": now,
         }
-    background_tasks.add_task(_send_otp_email_bg, user.email, otp, "2FA")
     return {
         "success": True,
         "requires_2fa": True,
         "challenge_id": challenge_id,
+        "delivery_method": method,
+        "delivery_status": delivery,
         "masked_email": _mask_email(user.email),
+        "masked_phone": _mask_phone(phone),
         "expires_in_seconds": 300,
     }
 
@@ -120,7 +179,7 @@ async def login(
             worker.password = upgraded_hash
         db.commit()
 
-    return _issue_login_challenge(user, background_tasks)
+    return await _issue_login_challenge(user, data.method, db)
 
 
 @router.post("/verify-2fa")
@@ -165,11 +224,11 @@ async def verify_2fa(data: Verify2FARequest, db: Session = Depends(get_db)):
 @router.post("/resend-otp")
 async def resend_otp(
     data: ResendOtpRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    if data.method.lower() != "email":
-        raise HTTPException(status_code=400, detail="Only email OTP is currently supported")
+    method = data.method.lower()
+    if method not in {"email", "sms"}:
+        raise HTTPException(status_code=400, detail="Verification method must be email or sms")
 
     now = datetime.utcnow()
     with _challenge_lock:
@@ -182,24 +241,36 @@ async def resend_otp(
         user_id = challenge["user_id"]
 
     user = db.query(User).filter(User.id == user_id).first()
-    if not user or not user.is_active or not user.email:
+    if not user or not user.is_active:
         raise HTTPException(status_code=403, detail="User account is unavailable")
+    worker = db.query(Worker).filter(Worker.id == user.id).first()
+    phone = user.phone_num or (str(worker.phone_num) if worker and worker.phone_num else None)
 
     otp = f"{randbelow(1_000_000):06d}"
+    delivery = await _deliver_login_otp(user, method, otp, phone)
     with _challenge_lock:
-        # Challenge may have expired while the user record was being loaded.
         challenge = _login_challenges.get(data.challenge_id)
-        if not challenge:
+        if not challenge or now > challenge["expires_at"]:
+            _login_challenges.pop(data.challenge_id, None)
             raise HTTPException(status_code=401, detail="Verification challenge is invalid or expired")
         challenge.update({
             "otp": otp,
+            "method": method,
             "attempts": 0,
             "created_at": now,
             "expires_at": now + timedelta(minutes=5),
             "last_sent_at": now,
         })
-    background_tasks.add_task(_send_otp_email_bg, user.email, otp, "2FA")
-    return {"success": True, "message": "Verification code sent", "expires_in_seconds": 300}
+
+    return {
+        "success": True,
+        "message": "Verification code sent",
+        "delivery_method": method,
+        "delivery_status": delivery,
+        "masked_email": _mask_email(user.email),
+        "masked_phone": _mask_phone(phone),
+        "expires_in_seconds": 300,
+    }
 
 
 @router.get("/me")
