@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 class LoginRequest(BaseModel):
     username: str
     password: str
+    method: str = Field(default="email", pattern=r"^(email|sms)$")
 
 
 class Verify2FARequest(BaseModel):
