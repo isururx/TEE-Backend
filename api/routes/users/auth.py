@@ -159,7 +159,6 @@ async def _issue_login_challenge(user: User, method: str, db: Session) -> dict:
 @router.post("/login")
 async def login(
     data: LoginRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     username = data.username.strip()
